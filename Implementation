@@ -1,0 +1,237 @@
+#Goal: To predict the "Primary Category" of the product using given data.
+import os
+for dirname, _, filenames in os.walk('/kaggle/input'):
+    for filename in filenames:
+        print(os.path.join(dirname, filename))
+#Import Statements
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from collections import Counter
+import nltk
+# Importing the data into Notebook
+Flipkart_orignal_data = pd.read_csv('flipkart_com-ecommerce_sample.csv')
+#After importing the data, a simple analysis of the data is done.
+Flipkart_orignal_data.info()
+#checking the head of the data 
+Flipkart_orignal_data.head(n=10)
+#to check the number of rows and cols
+Flipkart_orignal_data.shape
+Flipkart_orignal_data.isnull().sum()
+Flipkart_orignal_data.columns
+#Since we have done data analysis, we know that we need to clean our data.
+# Making a copy of orginal data
+flipkart_data = Flipkart_orignal_data.copy()
+#Lets Drop the Un-required Coloumns.
+flipkart_data.columns
+#Lets View the data Now
+flipkart_data
+# A function to Clean the product_category_tree and return Primary_Category
+def clean_prod_category():
+  primary_category=[]
+  #iterate in col
+  for ele in flipkart_data['product_category_tree']: 
+    ele=ele.replace('"]',"")
+    category=ele[2:].split(" >>")
+    primary_category.append(category[0])
+  #returning the clean data
+  return primary_category
+#Calling the function
+primary_category=clean_prod_category()
+#Verfying the output
+primary_category
+primary_category=pd.DataFrame(primary_category,columns=["Category"])
+print("Number of Unique Categories",len(primary_category["Category"].value_counts()))
+primary_category_top=Counter(primary_category["Category"]).most_common(266)
+primary_category_top
+# When we will try to plot the categories and its count , we will get a messy graph as there are 265 categories.
+plt.figure(figsize=(20,20))
+plt.title("Count Vs Category")
+sns.countplot(x="Category",data=primary_category,palette="rainbow",
+              order=primary_category["Category"].value_counts().index)
+plt.xticks(rotation=90,fontsize = 10, ha='left')
+plt.show()
+# A function which returns a output containg the top categories with more then 'n' counts.
+# Here, n stands for the count of categories , and bottom, if you want the categories with most/least count.
+# and 'List', do we need a list or dataframe.
+def count_of_category(n,bottom=False,List=False):
+    output=[]
+    primary_category_top=Counter(primary_category["Category"]).most_common(266)
+    if bottom:
+      for i in primary_category_top:
+        if i[1]<=n:
+            output.append(i)
+    else:
+      for i in primary_category_top:
+        if i[1]>=n:
+          output.append(i)
+    if not List:
+      output=pd.DataFrame(output,columns=["Category","Count"])
+    return output
+#Now lets try to find the categories with more then 500 counts 
+top_500_category = count_of_category(500)
+sns.catplot(x="Category", y="Count", kind='bar', aspect=2, palette='rainbow', data=top_500_category)
+plt.xticks(rotation=90)
+plt.show()
+#Let's see if its even feasible to visualize the categories with least counts
+bottom_categories=count_of_category(500,bottom=True,List=True)
+print("The number of categories with count less then 500 :",len(bottom_categories))
+bottom_categories
+#Further Cleaning and setting up the data for Predictions.
+#making a new column "primary_category"  
+flipkart_data["primary_category"]=primary_category
+flipkart_data.head()
+#Now there is no need for product_category_tree , so we drop it.
+flipkart_data.drop(flipkart_data.columns[[1]], axis=1, inplace=True)
+#removing the 2 null values in 'description' column
+flipkart_data=flipkart_data.dropna(subset=['description'])
+#checking the remaning null values in description
+flipkart_data[flipkart_data['description'].isnull()]
+#checking the remaning null values in the data.
+flipkart_data[flipkart_data.isnull().any(axis=1)]
+top_500_category = top_500_category['Category'][0:10]
+top_10_categories = list(top_500_category)
+top_10_categories
+flipkart_data
+# using 'isin' we filtered our flipkart data to have only top 10 categories
+flipkart_data= flipkart_data[flipkart_data['primary_category'].isin(top_10_categories)][['product_name','description','brand','primary_category']]
+flipkart_data
+# Verification
+flipkart_data.describe()
+#let's make a copy of orginal data 
+flipkart_data_merged=flipkart_data.copy()
+flipkart_data_merged
+# Merging the columns using string property
+flipkart_data_merged['text']= flipkart_data_merged['brand'].astype(str) +" "+ flipkart_data_merged['product_name'].astype(str) + " " + flipkart_data_merged['description'].astype(str)
+#created a new single feature 'text'
+#Dropping unrequired Columns
+flipkart_data_merged.drop(flipkart_data_merged.columns[[0,1,2]], axis=1, inplace=True)
+flipkart_data_merged
+# reindex the 'text' column in front
+flipkart_data_merged=flipkart_data_merged.reindex(['text','primary_category'],axis="columns")
+flipkart_data_merged
+# Let's use only "description" column to predict the categories 
+flipkart_data.drop(flipkart_data.columns[[0,2]], axis=1, inplace=True)
+flipkart_data
+#Reason to use Naive Bayes.
+#This problem is of Multi-class classification, So we need a classifer to define categories to the product based on text/description, Naive bayes is well suited for that, It's easy to implement and works well on small data. Other Algorithm that we can try is Linear Support Vector Classifier.
+from nltk.corpus import stopwords
+nltk.download('stopwords')
+from nltk.tokenize import word_tokenize
+import string # for removing punctuations in string
+#adding custom stopwords 
+# custom stopwords are selected from manual inspection
+new_stopwords = ["buy", "features", "key", "specifications","nan","NaN"]
+#extending the stopwords with custom stopwords
+stpwrd = nltk.corpus.stopwords.words('english')
+stpwrd.extend(new_stopwords)
+# This class preprocesses the text for us using tokenizer and stopwords.
+# it also removes punctuations if there are any.
+class PreProcessText(object):
+    def __init__(self):
+        pass
+    def __remove_punctuation(self, text):
+        """
+        Takes a String 
+        return : Return a String 
+        """
+        message = []
+        for x in text:
+            #Using String Library
+            if x in string.punctuation:
+                pass
+            else:
+                message.append(x)
+        message = ''.join(message)
+        
+        return message
+    def __remove_stopwords(self, text):
+        """
+        Takes a String
+        return List
+        """
+        words= []
+        for x in text.split():
+            #our custom stpwrd
+            if x.lower() in stpwrd:
+                pass
+            else:
+                words.append(x)
+        return words
+    def token_words(self,text=''):
+        """
+        Takes String
+        Return Token also called  list of words that is used to 
+        Train the Model 
+        """
+        message = self.__remove_punctuation(text)
+        words = self.__remove_stopwords(message)
+        return words
+obj = PreProcessText()
+flipkart_data["description"]=flipkart_data["description"].apply(obj.token_words)
+flipkart_data["description"]
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(flipkart_data["description"],flipkart_data["primary_category"], test_size=0.33)
+X_train
+X_train=X_train.apply(lambda x: ' '.join(x))
+X_test=X_test.apply(lambda x: ' '.join(x))
+#check
+X_test
+#Two methods that we can use are
+#TfidfVectorizer
+#CountVectorizer
+#To decide which one is better for our data,we can simply use both and try.
+from sklearn.feature_extraction.text import TfidfVectorizer 
+from sklearn.feature_extraction.text import CountVectorizer
+#Importing the ML model
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.pipeline import make_pipeline
+from sklearn.metrics import classification_report
+#TfidfVectorizer
+# we will use pipeline to make our model of TfidfVectorizer and MultinomialNB
+model=make_pipeline(TfidfVectorizer(),MultinomialNB())
+#Training our model
+model.fit(X_train,y_train)
+prediction_tfid=model.predict(X_test)
+from sklearn.metrics import accuracy_score
+print("Accuracy Score for flipkart_Data using Tfid : ",accuracy_score(y_test,prediction_tfid))
+#CountVectorizer
+# we will use pipeline to make our model of TfidfVectorizer and MultinomialNB
+model_2 = make_pipeline(CountVectorizer(),MultinomialNB())
+#Training our model
+model_2.fit(X_train,y_train)
+prediction_countV = model_2.predict(X_test)
+print("Accuracy Score for flipkart_Data using Count : ",accuracy_score(y_test,prediction_countV))
+print(classification_report(y_test,prediction_countV))
+#flipkart_data_merged
+#Now we will use the flipkart_data_merged with brand, product_name and description merged into "text".
+
+flipkart_data_merged
+obj = PreProcessText()
+flipkart_data_merged["text"]=flipkart_data_merged["text"].apply(obj.token_words)
+flipkart_data_merged['text']
+#Now, we can go forward and split the data into test and train.
+
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(flipkart_data_merged["text"],flipkart_data_merged["primary_category"], test_size=0.33)
+X_train=X_train.apply(lambda x: ' '.join(x))
+X_test=X_test.apply(lambda x: ' '.join(x))
+X_train
+#TfidfVecorizer
+# we will use pipeline to make our model of TfidfVectorizer and MultinomialNB
+model=make_pipeline(TfidfVectorizer(),MultinomialNB())
+#Training our model
+model.fit(X_train,y_train)
+prediction_tfid=model.predict(X_test)
+from sklearn.metrics import accuracy_score
+print("Accuracy Score for flipkart_data_merged using Tfid : ",accuracy_score(y_test,prediction_tfid)) # Expected higher result than flipkart_data
+#CountVectorizer
+# we will use pipeline to make our model of TfidfVectorizer and MultinomialNB
+model_2 = make_pipeline(CountVectorizer(),MultinomialNB())
+#Training our model
+model_2.fit(X_train,y_train)
+prediction_countV = model_2.predict(X_test)
+print("Accuracy Score for flipkart_data_mereged using Count : ",accuracy_score(y_test,prediction_countV)) 
+#Expects Higher result than flipkart_data_mereged
+print(classification_report(y_test,prediction_countV))
